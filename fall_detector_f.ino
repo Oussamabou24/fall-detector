@@ -13,21 +13,70 @@ An output is then sent to an android app in order to trigger an emrgency message
 
 */
 
-#include <Arduino_LSM9DS1.h> // library for using the arduino IMU
+
+#include <ArduinoBLE.h>
+#include <Arduino_LSM9DS1.h>
+
+
+BLEService ledService("19B10000-E8F2-537E-4F6C-D104768A1214"); // create service
+
+// create switch characteristic and allow remote device to read and write
+BLEByteCharacteristic switchCharacteristic("19B10001-E8F2-537E-4F6C-D104768A1214", BLERead );
+
+const int ledPin = LED_BUILTIN; // pin to use for the LED
+
+const int numSamples = 119;
+
+int samplesRead = numSamples;
+
+
+
 
 void setup() {
   Serial.begin(9600);
-  while (!Serial);
-  Serial.println("Started");
+  //while (!Serial);
 
+  pinMode(ledPin, OUTPUT); // use the LED pin as an output
+
+  // begin initialization
+  if (!BLE.begin()) {
+    Serial.println("starting BLE failed!");
+
+    while (1);
+  }
+
+
+  // set the local name peripheral advertises
+  BLE.setLocalName("Fall_detector");
+  // set the UUID for the service this peripheral advertises
+  BLE.setAdvertisedService(ledService);
+
+  // add the characteristic to the service
+  ledService.addCharacteristic(switchCharacteristic);
+
+  // add service
+  BLE.addService(ledService);
+
+  // assign event handlers for connected, disconnected to peripheral
+  BLE.setEventHandler(BLEConnected, blePeripheralConnectHandler);
+  BLE.setEventHandler(BLEDisconnected, blePeripheralDisconnectHandler);
+
+  // assign event handlers for characteristic
+  switchCharacteristic.setEventHandler(BLERead, switchCharacteristicWritten);
+  // set an initial value for the characteristic
+  switchCharacteristic.setValue(0);
+
+  // start advertising
+  BLE.advertise();
+
+  Serial.println(("Bluetooth device active, waiting for connections..."));
+  // initialize the IMU
   if (!IMU.begin()) {
     Serial.println("Failed to initialize IMU!");
     while (1);
   }
 
 }
-
-// List of parameters based on experimental observation of falls
 
 const int points_number = 300; // 300 points were chosen based on some data visulation and analysis of falls
 float val_acc[points_number];     // Array will contain the number of  acceleration points that will be analysed once a threshold is reached
@@ -39,6 +88,23 @@ float gyro_higher_threhold = 160;   // Higher gyroscope threshold : Peak of gyro
 int   free_fall_points_number = 4;  // Data visualization has shown that for a free-fall, at least 4 acceleration points below 0.75g can be observed
 
 void loop() {
+  // poll for BLE events
+  BLE.poll();
+}
+
+void blePeripheralConnectHandler(BLEDevice central) {
+  // central connected event handler
+  Serial.print("Connected event, central: ");
+  Serial.println(central.address());
+}
+
+void blePeripheralDisconnectHandler(BLEDevice central) {
+  // central disconnected event handler
+  Serial.print("Disconnected event, central: ");
+  Serial.println(central.address());
+}
+
+void switchCharacteristicWritten(BLEDevice central, BLECharacteristic characteristic) {
   float gx, gy, gz;                // Acceleration components that will be read using the Arduino IMU
   float ax,ay,az;                  // Acceleration components that will be read using the Arduino IMU
   
@@ -78,7 +144,10 @@ void loop() {
             for(int j=0;j< points_number;j++){
               if(val_gyr[j]> gyro_higher_threhold){                // Cheking among the rest of points for a gyroscope value peak, 
                   Serial.println("FALL DETECTED");
-                  delay(2000);
+                  switchCharacteristic.writeValue(1);
+                  Serial.println("value 1 written ");
+                  //delay(200);
+                   
                   break;
               }
              }
@@ -88,6 +157,13 @@ void loop() {
       count = 0;
      } 
     }
-   }
+else {
+    switchCharacteristic.writeValue(0);
+    Serial.println("LED off");
+    digitalWrite(ledPin, LOW);
   }
-      
+    
+   }
+
+  
+}
